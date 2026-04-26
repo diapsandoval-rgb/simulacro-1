@@ -1,1 +1,166 @@
 # simulacro-1
+<html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Sistema de Simulacros - I.E. La Esperanza</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Mantenemos tus estilos originales */
+        :root {
+            --primario: #1a237e; --acento: #3d5afe; --fondo: #f8fafc;
+            --blanco: #ffffff; --texto: #1e293b;
+            --sob: #10b981; --nor: #f59e0b; --baj: #f97316; --cri: #ef4444;
+        }
+        body { font-family: 'Inter', sans-serif; background: var(--fondo); color: var(--texto); margin: 0; }
+        .auth-screen { position: fixed; inset: 0; background: linear-gradient(135deg, var(--primario), var(--acento)); display: flex; justify-content: center; align-items: center; z-index: 2000; }
+        .auth-card { background: var(--blanco); padding: 40px; border-radius: 24px; width: 380px; text-align: center; box-shadow: 0 20px 25px rgba(0,0,0,0.1); }
+        .auth-card input { width: 100%; padding: 14px; margin: 10px 0; border: 1.5px solid #e2e8f0; border-radius: 12px; font-size: 1rem; }
+        .btn-login { background: var(--acento); color: white; border: none; width: 100%; padding: 14px; border-radius: 12px; cursor: pointer; font-weight: 700; }
+        .app { padding: 30px; max-width: 1500px; margin: auto; display: none; }
+        .header { background: var(--blanco); padding: 20px; border-radius: 20px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px; }
+        .stat-card { background: var(--blanco); padding: 20px; border-radius: 18px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .stat-card .val { font-size: 1.8rem; font-weight: 800; color: var(--primario); }
+        .charts { display: grid; grid-template-columns: 1fr 1.8fr; gap: 25px; margin-bottom: 25px; }
+        .chart-card { background: var(--blanco); padding: 25px; border-radius: 24px; height: 400px; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 20px; overflow: hidden; }
+        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #f1f5f9; }
+        .badge { padding: 5px 12px; border-radius: 99px; font-weight: 700; font-size: 0.65rem; }
+        .sob { background: #d1fae5; color: #065f46; } .nor { background: #fef3c7; color: #92400e; }
+        .baj { background: #ffedd5; color: #9a3412; } .cri { background: #fee2e2; color: #991b1b; }
+        #loadingOverlay { font-size: 0.9rem; color: #64748b; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="loginPage" class="auth-screen">
+        <div class="auth-card">
+            <h2 style="color: var(--primario);">I.E. La Esperanza</h2>
+            <div id="loginForm" style="display:none;">
+                <input type="email" id="userEmail" placeholder="Usuario (Correo)">
+                <input type="password" id="userPass" placeholder="Contraseña (1234)">
+                <button class="btn-login" onclick="validarIngreso()">Iniciar Sesión</button>
+            </div>
+            <div id="loadingOverlay">Conectando con la base de datos de Google...</div>
+        </div>
+    </div>
+
+    <div id="dashboard" class="app">
+        <div class="header">
+            <div>
+                <h2 style="margin:0;">Panel de Resultados</h2>
+                <div id="roleLabel" style="font-size: 0.8rem; color: var(--acento); font-weight: bold;"></div>
+            </div>
+            <button onclick="location.reload()" style="padding:10px 20px; border-radius:10px; cursor:pointer; border:none; background:#f1f5f9;">Cerrar</button>
+        </div>
+
+        <div id="statsGrid" class="stats-grid"></div>
+
+        <div class="charts">
+            <div class="chart-card"><canvas id="pieChart"></canvas></div>
+            <div class="chart-card"><canvas id="barChart"></canvas></div>
+        </div>
+
+        <div style="background:white; padding:25px; border-radius:24px;">
+            <table>
+                <thead>
+                    <tr><th>Pos</th><th style="text-align:left">Estudiante</th><th>Puntaje Global</th><th>Nivel</th></tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+<script>
+    // 1. REEMPLAZA ESTO CON TU ENLACE DE GOOGLE SHEETS (CSV)
+    const URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS3YbtSfRStlH9O8eBVPypfKcZqZwAu5yYVy7VfXZXfobLP03GrfuIwM2IWkBF0NIyEhizYfjqaxwjN/pub?output=csv";
+
+    let db = [];
+    let session = null;
+    let chartList = [];
+
+    function generarCorreo(n) { return n.toLowerCase().trim().replace(/\s+/g, '.') + "@esperanza.edu.com"; }
+
+    // Función principal para sincronizar con la nube
+    async function sincronizar() {
+        try {
+            const respuesta = await fetch(URL_GOOGLE_SHEETS);
+            const texto = await respuesta.text();
+            const filas = texto.split("\n").slice(1); // Quitamos el encabezado
+
+            db = filas.map(linea => {
+                const r = linea.split(",");
+                if(r.length < 13) return null; // Saltar líneas vacías
+
+                const g = Math.round(parseFloat(r[13])) || 0;
+                let nv = g >= 300 ? {n:"Sobresaliente",c:"sob"} : g >= 250 ? {n:"Normal",c:"nor"} : g >= 200 ? {n:"Bajo",c:"baj"} : {n:"Crítico",c:"cri"};
+                
+                return { 
+                    nombre: r[1].trim(), 
+                    lec: r[2], mat: r[5], soc: r[8], cie: r[11], ing: r[12], 
+                    global: g, nivel: nv 
+                };
+            }).filter(d => d !== null).sort((a, b) => b.global - a.global);
+
+            document.getElementById('loadingOverlay').style.display = 'none';
+            document.getElementById('loginForm').style.display = 'block';
+        } catch (error) {
+            document.getElementById('loadingOverlay').innerText = "❌ Error al conectar. Verifica el enlace.";
+        }
+    }
+
+    function validarIngreso() {
+        const email = document.getElementById('userEmail').value.toLowerCase().trim();
+        const pass = document.getElementById('userPass').value;
+
+        if(email === "admin@esperanza.edu.com" && pass === "1234") {
+            entrar({ nombre: "Administrador", rol: "admin" });
+        } else {
+            const found = db.find(est => generarCorreo(est.nombre) === email);
+            if(found && pass === "1234") entrar({ ...found, rol: "estudiante" });
+            else alert("Correo o contraseña incorrectos");
+        }
+    }
+
+    function entrar(u) {
+        session = u;
+        document.getElementById('loginPage').style.display = 'none';
+        document.getElementById('dashboard').style.display = 'block';
+        document.getElementById('roleLabel').innerText = u.nombre;
+        render();
+    }
+
+    function render() {
+        // Si es estudiante, solo ve sus datos. Si es admin, ve todos.
+        const data = session.rol === 'admin' ? db : db.filter(e => e.nombre === session.nombre);
+        
+        // Tabla
+        document.getElementById('tableBody').innerHTML = data.map(s => {
+            const puesto = db.findIndex(x => x.nombre === s.nombre) + 1;
+            return `<tr><td>#${puesto}</td><td style="text-align:left">${s.nombre}</td><td><b>${s.global}</b></td><td><span class="badge ${s.nivel.c}">${s.nivel.n}</span></td></tr>`;
+        }).join('');
+
+        // Estadísticas
+        const materias = ['lec','mat','soc','cie','ing','global'];
+        const etiquetas = ['Lectura','Mates','Sociales','Ciencias','Inglés','Global'];
+        document.getElementById('statsGrid').innerHTML = materias.map((m, i) => {
+            const prom = Math.round(data.reduce((a, b) => a + Number(b[m]), 0) / (data.length || 1));
+            return `<div class="stat-card"><h5>${etiquetas[i]}</h5><div class="val">${prom}</div></div>`;
+        }).join('');
+
+        // Gráficos
+        chartList.forEach(c => c.destroy());
+        const lv = {sob:0, nor:0, baj:0, cri:0}; data.forEach(s => lv[s.nivel.c]++);
+        
+        chartList.push(new Chart(document.getElementById('pieChart'), {
+            type: 'doughnut',
+            data: { labels:['Sobresaliente','Normal','Bajo','Crítico'], datasets:[{ data:Object.values(lv), backgroundColor:['#10b981','#f59e0b','#f97316','#ef4444'] }] },
+            options: { maintainAspectRatio: false }
+        }));
+    }
+
+    window.onload = sincronizar;
+</script>
+</body>
+</html>
